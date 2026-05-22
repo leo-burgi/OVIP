@@ -54,12 +54,6 @@ const Admin = () => {
     setLoading(true);
     try {
       const response = await productsApi.getAll();
-      if (!Array.isArray(response.data)) {
-        console.error("/products no devolvió un array:", response.data);
-        setProducts([]);
-        toast.error("La API de productos no devolvió datos válidos");
-        return;
-      }
       setProducts(response.data);
     } catch (error) {
       toast.error("Error cargando productos");
@@ -71,11 +65,6 @@ const Admin = () => {
   const fetchCategories = async () => {
     try {
       const response = await categoriesApi.getAll();
-      if (!Array.isArray(response.data)) {
-        console.error("/categories no devolvió un array:", response.data);
-        setCategories([]);
-        return;
-      }
       setCategories(response.data);
     } catch (error) {
       console.error("Error cargando categorías:", error);

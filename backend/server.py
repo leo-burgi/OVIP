@@ -13,6 +13,7 @@ from typing import Dict, List, Optional
 import mercadopago
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response
+from pymongo.errors import PyMongoError, ServerSelectionTimeoutError
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from starlette.middleware.cors import CORSMiddleware
@@ -32,7 +33,40 @@ MP_USE_SANDBOX = os.environ.get("MP_USE_SANDBOX", "false").lower() in {"1", "tru
 FREE_SHIPPING_FROM = float(os.environ.get("FREE_SHIPPING_FROM", "80000"))
 DEFAULT_SHIPPING_COST = float(os.environ.get("DEFAULT_SHIPPING_COST", "8000"))
 
-client = AsyncIOMotorClient(MONGO_URL)
+DEFAULT_CATEGORIES = [
+    {
+        "category_id": "cat_move",
+        "nombre": "OVI Move",
+        "descripcion": "Articulados que se mueven y se coleccionan",
+    },
+    {
+        "category_id": "cat_build",
+        "nombre": "OVI Build",
+        "descripcion": "Kits para armar, encastrar y construir",
+    },
+    {
+        "category_id": "cat_game",
+        "nombre": "OVI Game",
+        "descripcion": "Juegos simples para compartir en familia",
+    },
+    {
+        "category_id": "cat_mini",
+        "nombre": "OVI Mini",
+        "descripcion": "Figuras pequeñas, llaveros y accesorios",
+    },
+    {
+        "category_id": "cat_learn",
+        "nombre": "OVI Learn",
+        "descripcion": "Letras, números y formas para aprender jugando",
+    },
+]
+
+client = AsyncIOMotorClient(
+    MONGO_URL,
+    serverSelectionTimeoutMS=int(os.environ.get("MONGO_SERVER_SELECTION_TIMEOUT_MS", "5000")),
+    connectTimeoutMS=int(os.environ.get("MONGO_CONNECT_TIMEOUT_MS", "5000")),
+    socketTimeoutMS=int(os.environ.get("MONGO_SOCKET_TIMEOUT_MS", "5000")),
+)
 db = client[DB_NAME]
 mp_sdk = mercadopago.SDK(MP_ACCESS_TOKEN) if MP_ACCESS_TOKEN else None
 
@@ -252,8 +286,26 @@ async def mark_order_as_paid(order_id: str, payment: Dict) -> None:
         await db.carts.delete_one({"owner_id": cart_owner_id})
 
 
-@app.on_event("startup")
-async def startup() -> None:
+async def ping_db() -> tuple[bool, Optional[str]]:
+    try:
+        await db.command("ping")
+        return True, None
+    except (ServerSelectionTimeoutError, PyMongoError) as exc:
+        return False, str(exc)
+    except Exception as exc:
+        return False, str(exc)
+
+
+async def ensure_default_categories() -> None:
+    for category in DEFAULT_CATEGORIES:
+        await db.categories.update_one(
+            {"category_id": category["category_id"]},
+            {"$setOnInsert": category},
+            upsert=True,
+        )
+
+
+async def ensure_indexes() -> None:
     await db.products.create_index("product_id", unique=True)
     await db.products.create_index("categoria")
     await db.categories.create_index("category_id", unique=True)
@@ -263,10 +315,31 @@ async def startup() -> None:
     await db.orders.create_index("mp_payment_id")
 
 
+@app.on_event("startup")
+async def startup() -> None:
+    # No hacemos caer toda la app si Mongo está mal configurado.
+    # Así /api/health responde y permite diagnosticar el problema en Railway.
+    db_ok, db_error = await ping_db()
+    if not db_ok:
+        logger.error("MongoDB no disponible al iniciar: %s", db_error)
+        return
+
+    await ensure_indexes()
+    await ensure_default_categories()
+
+
 @api_router.get("/health")
 async def health():
-    await db.command("ping")
-    return {"ok": True, "service": "oviplay-api", "db": DB_NAME}
+    db_ok, db_error = await ping_db()
+    return {
+        "ok": db_ok,
+        "service": "oviplay-api",
+        "db": DB_NAME,
+        "mongo_connected": db_ok,
+        "mongo_error": db_error if not db_ok else None,
+        "frontend_base_url": FRONTEND_BASE_URL,
+        "backend_base_url": BACKEND_BASE_URL,
+    }
 
 
 @api_router.get("/auth/me")
@@ -374,6 +447,10 @@ async def delete_product(product_id: str):
 @api_router.get("/categories")
 async def get_categories():
     categories = await db.categories.find({}, {"_id": 0}).sort("nombre", 1).to_list(100)
+    if not categories:
+        # Fallback útil para una base nueva: el admin ya puede cargar productos
+        # aunque todavía no se haya corrido seed_data.py.
+        return DEFAULT_CATEGORIES
     return categories
 
 

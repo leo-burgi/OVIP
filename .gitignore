@@ -97,3 +97,7 @@ credentials.json
 *.pem
 *.key
 .credentials
+
+# Keep template env files in repo
+!.env.example
+!**/.env.example

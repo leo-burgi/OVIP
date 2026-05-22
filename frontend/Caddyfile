@@ -1,8 +1,8 @@
 :{$PORT}
+root * /usr/share/caddy
 
 @api path /api/*
-respond @api "Este es el frontend. /api debe resolverse contra el backend. Revisar REACT_APP_BACKEND_URL." 502
+respond @api "El frontend recibió una llamada /api. Configurá REACT_APP_BACKEND_URL con la URL pública del backend y redeployá el frontend." 502
 
-root * /usr/share/caddy
 try_files {path} /index.html
 file_server

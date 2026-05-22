@@ -178,3 +178,42 @@ https://tu-frontend.railway.app/admin
 Ingresar la misma clave configurada en `ADMIN_API_KEY`.
 
 Este admin es suficiente para MVP, no para operación seria. Próximo paso: usuarios reales, roles, imágenes propias, variantes, órdenes, estados de envío y notificaciones.
+
+## Reset aplicado para este deploy
+
+URLs actuales usadas en Railway:
+
+```txt
+Frontend: https://talented-vitality-production-8431.up.railway.app
+Backend: https://ovip-production.up.railway.app
+Health:   https://ovip-production.up.railway.app/api/health
+```
+
+Variables finales recomendadas:
+
+Backend `OVIP`:
+
+```env
+MONGO_URL=${{MongoDB.MONGO_URL}}
+DB_NAME=oviplay
+FRONTEND_BASE_URL=https://talented-vitality-production-8431.up.railway.app
+BACKEND_BASE_URL=https://ovip-production.up.railway.app
+CORS_ORIGINS=https://talented-vitality-production-8431.up.railway.app,http://localhost:3000,http://127.0.0.1:3000
+COOKIE_SECURE=true
+ADMIN_API_KEY=una-clave-larga-privada
+MP_ACCESS_TOKEN=TEST-tu-token-de-mercadopago
+MP_USE_SANDBOX=true
+FREE_SHIPPING_FROM=80000
+DEFAULT_SHIPPING_COST=8000
+MONGO_SERVER_SELECTION_TIMEOUT_MS=5000
+MONGO_CONNECT_TIMEOUT_MS=5000
+MONGO_SOCKET_TIMEOUT_MS=5000
+```
+
+Frontend `talented-vitality`:
+
+```env
+REACT_APP_BACKEND_URL=https://ovip-production.up.railway.app
+```
+
+El código actual endurece `/api/health`: si Mongo falla, la aplicación ya no debería caerse completa; el endpoint debe responder con `mongo_connected: false` y el error de conexión. Eso permite diagnosticar variables sin quedar a ciegas con un 502 genérico.

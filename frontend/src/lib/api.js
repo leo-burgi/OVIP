@@ -1,8 +1,36 @@
 import axios from "axios";
 
 const rawBackendUrl = process.env.REACT_APP_BACKEND_URL || window.location.origin;
-const BACKEND_URL = rawBackendUrl.replace(/\/$/, "");
+const BACKEND_URL = rawBackendUrl.replace(/\/+$/, "").replace(/\/api$/, "");
 export const API_URL = `${BACKEND_URL}/api`;
+
+const normalizeArrayResponse = (promise, label) =>
+  promise.then((response) => {
+    if (Array.isArray(response.data)) {
+      return response;
+    }
+
+    console.error(
+      `[OVIP] La API de ${label} no devolvió un array. Revisá REACT_APP_BACKEND_URL y el estado del backend.`,
+      response.data
+    );
+    response.data = [];
+    return response;
+  });
+
+const normalizeObjectResponse = (promise, fallback, label) =>
+  promise.then((response) => {
+    if (response.data && typeof response.data === "object" && !Array.isArray(response.data)) {
+      return response;
+    }
+
+    console.error(
+      `[OVIP] La API de ${label} no devolvió un objeto válido. Revisá REACT_APP_BACKEND_URL y el estado del backend.`,
+      response.data
+    );
+    response.data = fallback;
+    return response;
+  });
 
 export const api = axios.create({
   baseURL: API_URL,
@@ -12,28 +40,6 @@ export const api = axios.create({
   },
 });
 
-api.interceptors.response.use(
-  (response) => {
-    // Si el frontend quedó apuntando a su propio dominio, Caddy puede devolver
-    // index.html para /api/* con status 200. Eso rompe luego con `.map is not a function`.
-    const contentType = response.headers?.["content-type"] || "";
-    const looksLikeHtml =
-      typeof response.data === "string" &&
-      response.data.trim().toLowerCase().startsWith("<!doctype html");
-
-    if (contentType.includes("text/html") || looksLikeHtml) {
-      return Promise.reject(
-        new Error(
-          `La API devolvió HTML en vez de JSON. Revisar REACT_APP_BACKEND_URL. URL usada: ${API_URL}`
-        )
-      );
-    }
-
-    return response;
-  },
-  (error) => Promise.reject(error)
-);
-
 api.interceptors.request.use((config) => {
   const adminKey = window.localStorage.getItem("OVIP_ADMIN_KEY");
   if (adminKey) {
@@ -42,13 +48,35 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+api.interceptors.response.use(
+  (response) => {
+    const contentType = response.headers?.["content-type"] || "";
+    if (typeof response.data === "string" && contentType.includes("text/html")) {
+      console.error(
+        `[OVIP] La llamada a ${response.config?.url} devolvió HTML. Casi seguro el frontend está apuntando a sí mismo y no al backend. Variable actual: REACT_APP_BACKEND_URL=${BACKEND_URL}`
+      );
+    }
+    return response;
+  },
+  (error) => {
+    console.error("[OVIP] Error de API", {
+      url: error.config?.url,
+      baseURL: error.config?.baseURL,
+      status: error.response?.status,
+      data: error.response?.data,
+      message: error.message,
+    });
+    return Promise.reject(error);
+  }
+);
+
 export const authApi = {
   getMe: () => api.get("/auth/me"),
   logout: () => api.post("/auth/logout"),
 };
 
 export const productsApi = {
-  getAll: (params) => api.get("/products", { params }),
+  getAll: (params) => normalizeArrayResponse(api.get("/products", { params }), "productos"),
   getById: (id) => api.get(`/products/${id}`),
   create: (data) => api.post("/admin/products", data),
   update: (id, data) => api.put(`/admin/products/${id}`, data),
@@ -56,11 +84,11 @@ export const productsApi = {
 };
 
 export const categoriesApi = {
-  getAll: () => api.get("/categories"),
+  getAll: () => normalizeArrayResponse(api.get("/categories"), "categorías"),
 };
 
 export const cartApi = {
-  get: () => api.get("/cart"),
+  get: () => normalizeObjectResponse(api.get("/cart"), { items: [] }, "carrito"),
   add: (productId, quantity) => api.post("/cart/add", { product_id: productId, quantity }),
   remove: (productId) => api.delete(`/cart/remove/${productId}`),
   update: (productId, quantity) => api.put(`/cart/update/${productId}`, null, { params: { quantity } }),
@@ -69,7 +97,7 @@ export const cartApi = {
 export const ordersApi = {
   create: (data) => api.post("/orders", data),
   getById: (id) => api.get(`/orders/${id}`),
-  getAdminAll: () => api.get("/admin/orders"),
+  getAdminAll: () => normalizeArrayResponse(api.get("/admin/orders"), "órdenes"),
 };
 
 export const mpApi = {
