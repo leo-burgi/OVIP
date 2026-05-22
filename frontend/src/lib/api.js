@@ -12,6 +12,28 @@ export const api = axios.create({
   },
 });
 
+api.interceptors.response.use(
+  (response) => {
+    // Si el frontend quedó apuntando a su propio dominio, Caddy puede devolver
+    // index.html para /api/* con status 200. Eso rompe luego con `.map is not a function`.
+    const contentType = response.headers?.["content-type"] || "";
+    const looksLikeHtml =
+      typeof response.data === "string" &&
+      response.data.trim().toLowerCase().startsWith("<!doctype html");
+
+    if (contentType.includes("text/html") || looksLikeHtml) {
+      return Promise.reject(
+        new Error(
+          `La API devolvió HTML en vez de JSON. Revisar REACT_APP_BACKEND_URL. URL usada: ${API_URL}`
+        )
+      );
+    }
+
+    return response;
+  },
+  (error) => Promise.reject(error)
+);
+
 api.interceptors.request.use((config) => {
   const adminKey = window.localStorage.getItem("OVIP_ADMIN_KEY");
   if (adminKey) {

@@ -1,4 +1,8 @@
 :{$PORT}
+
+@api path /api/*
+respond @api "Este es el frontend. /api debe resolverse contra el backend. Revisar REACT_APP_BACKEND_URL." 502
+
 root * /usr/share/caddy
 try_files {path} /index.html
 file_server
