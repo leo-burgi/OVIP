@@ -296,6 +296,27 @@ async def ping_db() -> tuple[bool, Optional[str]]:
         return False, str(exc)
 
 
+async def health_payload() -> Dict:
+    """Respuesta liviana para Railway y para diagnóstico manual.
+
+    Importante: no exponemos secretos. Solo mostramos si las variables críticas
+    están presentes y si Mongo responde.
+    """
+    db_ok, db_error = await ping_db()
+    return {
+        "ok": db_ok,
+        "service": "oviplay-api",
+        "db": DB_NAME,
+        "mongo_connected": db_ok,
+        "mongo_error": db_error if not db_ok else None,
+        "frontend_base_url": FRONTEND_BASE_URL,
+        "backend_base_url": BACKEND_BASE_URL,
+        "cors_origins": parse_origins(),
+        "mp_configured": bool(MP_ACCESS_TOKEN),
+        "admin_key_configured": bool(ADMIN_API_KEY),
+    }
+
+
 async def ensure_default_categories() -> None:
     for category in DEFAULT_CATEGORIES:
         await db.categories.update_one(
@@ -318,28 +339,35 @@ async def ensure_indexes() -> None:
 @app.on_event("startup")
 async def startup() -> None:
     # No hacemos caer toda la app si Mongo está mal configurado.
-    # Así /api/health responde y permite diagnosticar el problema en Railway.
+    # Así /health y /api/health responden y permiten diagnosticar el problema
+    # en Railway sin quedar a ciegas con un 502 genérico.
     db_ok, db_error = await ping_db()
     if not db_ok:
         logger.error("MongoDB no disponible al iniciar: %s", db_error)
         return
 
-    await ensure_indexes()
-    await ensure_default_categories()
+    try:
+        await ensure_indexes()
+        await ensure_default_categories()
+    except Exception as exc:
+        logger.exception("MongoDB respondió, pero falló la inicialización de índices/categorías: %s", exc)
+
+
+@app.get("/")
+async def root():
+    # Railway y el navegador suelen probar la raíz. Antes devolvía 404; si el
+    # healthcheck apuntaba a /, el deploy podía quedar eternamente en Deploying.
+    return {"ok": True, "service": "oviplay-api", "health": "/health", "docs": "/docs"}
+
+
+@app.get("/health")
+async def root_health():
+    return await health_payload()
 
 
 @api_router.get("/health")
-async def health():
-    db_ok, db_error = await ping_db()
-    return {
-        "ok": db_ok,
-        "service": "oviplay-api",
-        "db": DB_NAME,
-        "mongo_connected": db_ok,
-        "mongo_error": db_error if not db_ok else None,
-        "frontend_base_url": FRONTEND_BASE_URL,
-        "backend_base_url": BACKEND_BASE_URL,
-    }
+async def api_health():
+    return await health_payload()
 
 
 @api_router.get("/auth/me")
