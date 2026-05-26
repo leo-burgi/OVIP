@@ -20,11 +20,9 @@ def normalize_text(value: str) -> str:
     return value.lower().strip()
 
 async def seed_data():
-    print("Iniciando seed de datos...")
-    
-    existing_categories = await db.categories.count_documents({})
-    if existing_categories == 0:
-        categories = [
+    print("Iniciando seed de datos idempotente...")
+
+    categories = [
             {
                 "category_id": "cat_move",
                 "nombre": "OVI Move",
@@ -51,12 +49,16 @@ async def seed_data():
                 "descripcion": "Letras, números y formas para aprender jugando"
             }
         ]
-        await db.categories.insert_many(categories)
-        print(f"Se crearon {len(categories)} categorías")
-    
-    existing_products = await db.products.count_documents({})
-    if existing_products == 0:
-        products = [
+
+    for category in categories:
+        await db.categories.update_one(
+            {"category_id": category["category_id"]},
+            {"$set": category},
+            upsert=True,
+        )
+    print(f"Categorías sincronizadas: {len(categories)}")
+
+    products = [
             {
                 "product_id": "prod_001",
                 "nombre": "Dragón Articulado Multicolor",
@@ -238,25 +240,32 @@ async def seed_data():
                 "created_at": datetime.now(timezone.utc).isoformat()
             }
         ]
-        for product in products:
-            product['nombre_normalizado'] = normalize_text(product['nombre'])
-            product['descripcion_normalizada'] = normalize_text(product['descripcion'])
-        await db.products.insert_many(products)
-        print(f"Se crearon {len(products)} productos")
-    
-    existing_admin = await db.users.find_one({"email": "admin@oviplay.com"})
-    if not existing_admin:
-        admin_user = {
-            "user_id": "user_admin001",
-            "email": "admin@oviplay.com",
-            "name": "Administrador OVI Play",
-            "picture": "",
-            "role": "admin",
-            "created_at": datetime.now(timezone.utc).isoformat()
-        }
-        await db.users.insert_one(admin_user)
-        print("Usuario administrador creado")
-    
+
+    for product in products:
+        product["nombre_normalizado"] = normalize_text(product["nombre"])
+        product["descripcion_normalizada"] = normalize_text(product["descripcion"])
+        await db.products.update_one(
+            {"product_id": product["product_id"]},
+            {"$set": product},
+            upsert=True,
+        )
+    print(f"Productos sincronizados: {len(products)}")
+
+    admin_user = {
+        "user_id": "user_admin001",
+        "email": "admin@oviplay.com",
+        "name": "Administrador OVI Play",
+        "picture": "",
+        "role": "admin",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.users.update_one(
+        {"email": admin_user["email"]},
+        {"$setOnInsert": admin_user},
+        upsert=True,
+    )
+    print("Usuario administrador verificado")
+
     print("¡Seed completado exitosamente!")
     client.close()
 
